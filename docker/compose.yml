@@ -1,0 +1,31 @@
+# Run ./configure.sh once to generate the .env file with the correct values
+# for your system (UID/GID, render/video groups, runtime directory, display).
+
+services:
+  xsat-test:
+    container_name: xsat-test
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    environment:
+      - BRANCH=${BRANCH:-main}
+      - QT=${QT:-1}
+      - XDG_RUNTIME_DIR=/run/xdg
+      - WAYLAND_DISPLAY=/run/wayland-0
+      - HOST_X11_DISPLAY=${HOST_X11_DISPLAY:-:0}
+      - HOST_RUNTIME_DIR=/run/host-xdg
+      - TEST_STARTUP_REQUEST_DELAY_MS=${TEST_STARTUP_REQUEST_DELAY_MS:-20}
+      - TEST_USE_TITLEBAR=${TEST_USE_TITLEBAR:-0}
+      - TEST_TITLEBAR_MINMAX=${TEST_TITLEBAR_MINMAX:-1}
+    tmpfs:
+      - /run/xdg:uid=${UID:-1000},gid=${GID:-1000},mode=0700
+    devices:
+      - /dev/dri:/dev/dri
+    volumes:
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}/${WAYLAND_DISPLAY:-wayland-0}:/run/wayland-0:ro
+      - /tmp/.X11-unix:/tmp/.X11-host-unix:ro
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}:/run/host-xdg:ro
+    restart: "no"
