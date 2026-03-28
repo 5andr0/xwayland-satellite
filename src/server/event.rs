@@ -92,33 +92,7 @@ impl Event for SurfaceEvents {
             SurfaceEvents::Toplevel(event) => Self::toplevel_event(event, target, state),
             SurfaceEvents::Popup(event) => Self::popup_event(event, target, state),
             SurfaceEvents::FractionalScale(event) => match event {
-                wp_fractional_scale_v1::Event::PreferredScale { scale } => {
-                    let state = state.deref_mut();
-                    let entity = state.world.entity(target).unwrap();
-                    let factor = scale as f64 / 120.0;
-                    debug!(
-                        "{} scale factor: {}",
-                        entity.get::<&WlSurface>().unwrap().id(),
-                        factor
-                    );
-
-                    entity.get::<&mut SurfaceScaleFactor>().unwrap().0 = factor;
-
-                    if let Some(OnOutput(output)) = entity.get::<&OnOutput>().as_deref().copied() {
-                        if update_output_scale(
-                            state.world.query_one(output).unwrap(),
-                            OutputScaleFactor::Fractional(factor),
-                        ) {
-                            state.updated_outputs.push(output);
-                        }
-                    }
-                    if entity.has::<WindowData>() {
-                        update_surface_viewport(
-                            &state.world,
-                            state.world.query_one(target).unwrap(),
-                        );
-                    }
-                }
+                wp_fractional_scale_v1::Event::PreferredScale { .. } => {}
                 _ => unreachable!(),
             },
             SurfaceEvents::DecorationEvent(event) => {
@@ -233,22 +207,12 @@ impl SurfaceEvents {
                         connection.focus_window(*window, output);
                     }
 
-                    if state.fractional_scale.is_none() {
-                        let output_scale = output_data.get::<&OutputScaleFactor>().unwrap().get();
-                        data.get::<&mut SurfaceScaleFactor>().unwrap().0 = output_scale;
-                        drop(query);
-                        update_surface_viewport(
-                            &state.world,
-                            state.world.query_one(target).unwrap(),
-                        );
-                    } else {
-                        let scale = data.get::<&SurfaceScaleFactor>().unwrap();
-                        if update_output_scale(
-                            state.world.query_one(on_output.0).unwrap(),
-                            OutputScaleFactor::Fractional(scale.0),
-                        ) {
-                            state.updated_outputs.push(on_output.0);
-                        }
+                    let scale = data.get::<&SurfaceScaleFactor>().unwrap();
+                    if update_output_scale(
+                        state.world.query_one(on_output.0).unwrap(),
+                        OutputScaleFactor::Fractional(scale.0),
+                    ) {
+                        state.updated_outputs.push(on_output.0);
                     }
                 }
                 cmd.insert_one(target, on_output);
@@ -1337,9 +1301,6 @@ impl OutputEvent {
                     OutputScaleFactor::Output(factor),
                 ) {
                     state.updated_outputs.push(target);
-                }
-                if state.fractional_scale.is_none() {
-                    state.world.get::<&WlOutput>(target).unwrap().scale(factor);
                 }
             }
             Event::Name { name } => {
