@@ -486,7 +486,6 @@ impl XState {
                     self.handle_property_change(e, server_state);
                 }
                 xcb::Event::X(x::Event::ConfigureRequest(e)) => {
-                    let can_change_position = server_state.can_change_position(e.window());
                     let dims = WindowDims {
                         x: e.x(),
                         y: e.y(),
@@ -498,7 +497,6 @@ impl XState {
                     let translated_move = mask.intersects(x::ConfigWindowMask::X | x::ConfigWindowMask::Y)
                         && server_state.begin_configure_move(e.window(), dims, mask);
 
-<<<<<<< HEAD
                     server_state.handle_configure_request(
                         e.window(),
                         mask,
@@ -508,10 +506,8 @@ impl XState {
                         e.height(),
                     );
 
-                    if server_state.can_change_position(e.window()) {
-=======
+                    let can_change_position = server_state.can_change_position(e.window());
                     if !translated_move && can_change_position {
->>>>>>> 79262bf (fix: translate ConfigureRequest drags to xdg_toplevel.move)
                         if mask.contains(x::ConfigWindowMask::X) {
                             list.push(x::ConfigWindow::X(e.x().into()));
                         }
@@ -770,38 +766,17 @@ impl XState {
                             | motif::Functions::All,
                     )
                 });
-<<<<<<< HEAD
             motif_functions_empty = hints.functions.is_some_and(|f| f.is_empty());
-=======
-            // Empty function hints are common on client-side decorated toplevels.
-            // Respect an explicit NORMAL window type instead of forcing such windows
-            // down the popup path, which breaks configure-request drag translation.
-            if hints.functions.is_some_and(|f| f.is_empty()) && !has_explicit_normal_type {
-                return Ok(true);
-            }
->>>>>>> 79262bf (fix: translate ConfigureRequest drags to xdg_toplevel.move)
         }
+
         let mut is_popup = override_redirect;
-
-<<<<<<< HEAD
-        let window_types = window_types.resolve()?.unwrap_or_else(|| {
-            if !override_redirect && has_transient_for {
-                vec![self.window_atoms.dialog]
-            } else {
-                vec![self.window_atoms.normal]
-            }
-        });
-
-        let has_normal_type = window_types.contains(&self.window_atoms.normal);
 
         // Empty MOTIF functions are a reasonable popup signal for ambiguous windows,
         // but some normal undecorated toplevels use them for client-side chrome.
-        if motif_functions_empty && !has_normal_type {
+        if motif_functions_empty && !has_explicit_normal_type {
             return Ok(true);
         }
 
-=======
->>>>>>> 79262bf (fix: translate ConfigureRequest drags to xdg_toplevel.move)
         if log::log_enabled!(log::Level::Debug) {
             let win_types = window_types
                 .iter()
