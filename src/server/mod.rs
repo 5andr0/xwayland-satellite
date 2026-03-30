@@ -11,7 +11,7 @@ use crate::xstate::{Decorations, MoveResizeDirection, WindowDims, WmHints, WmNam
 use crate::{X11Selection, XConnection, timespec_from_millis};
 use clientside::MyWorld;
 use decoration::{DecorationsData, DecorationsDataSatellite};
-use hecs::Entity;
+use hecs::{Entity, World};
 use log::{debug, error, warn};
 use rustix::event::{PollFd, PollFlags, poll};
 use rustix::fs::Timespec;
@@ -165,6 +165,67 @@ impl WindowData {
             debug!(target: "output_offset", "set {:?} offset to {:?}", window, self.output_offset);
         }
     }
+}
+
+fn constraint_scale_for_output(world: &World, on_output: Option<OnOutput>) -> f64 {
+    let Some(OnOutput(output)) = on_output else {
+        return 1.0;
+    };
+
+    let fallback_scale = match world.get::<&OutputScaleFactor>(output) {
+        Ok(scale) => scale.get(),
+        Err(_) => 1.0,
+    };
+
+    match world.get::<&OutputDimensions>(output) {
+        Ok(dimensions) => dimensions.constraint_scale(fallback_scale),
+        Err(_) => fallback_scale.max(1.0),
+    }
+}
+
+fn constraint_scale_for_surface(
+    world: &World,
+    on_output: Option<OnOutput>,
+    preferred_scale: Option<f64>,
+) -> f64 {
+    let preferred_scale = preferred_scale.unwrap_or(1.0).max(1.0);
+
+    if preferred_scale > 1.01 {
+        let mut best_scale = None;
+        let mut best_delta = f64::INFINITY;
+        let mut best_on_output = false;
+
+        for (entity, (dimensions, output_scale)) in world
+            .query::<(&OutputDimensions, &OutputScaleFactor)>()
+            .iter()
+        {
+            let constraint_scale = dimensions.constraint_scale(output_scale.get());
+            let delta = (constraint_scale - preferred_scale).abs();
+            let on_output_match = on_output.is_some_and(|current| current.0 == entity);
+
+            let should_replace = if best_scale.is_none() {
+                true
+            } else if delta + 0.01 < best_delta {
+                true
+            } else if (delta - best_delta).abs() <= 0.01 {
+                on_output_match && !best_on_output
+            } else {
+                false
+            };
+
+            if should_replace {
+                best_scale = Some(constraint_scale);
+                best_delta = delta;
+                best_on_output = on_output_match;
+            }
+        }
+
+        if let Some(scale) = best_scale {
+            return scale;
+        }
+    }
+
+    constraint_scale_for_output(world, on_output)
 }
 
 struct SurfaceAttach {
@@ -968,24 +1029,43 @@ impl<S: X11Selection + 'static> InnerServerState<S> {
 
         if win.attrs.size_hints.is_none_or(|h| h != hints) {
             debug!("setting {window:?} hints {hints:?}");
-            let mut query = data.query::<(&SurfaceRole, &SurfaceScaleFactor)>();
-            if let Some((SurfaceRole::Toplevel(Some(data)), scale_factor)) = query.get() {
+            let mut query = data.query::<(
+                &SurfaceRole,
+                Option<&OnOutput>,
+                Option<&event::PreferredSurfaceScaleFactor>,
+            )>();
+            if let Some((SurfaceRole::Toplevel(Some(data)), on_output, preferred_scale)) = query.get() {
                 let decorations_height = if data.decoration.satellite.is_some() {
                     DecorationsDataSatellite::TITLEBAR_HEIGHT
                 } else {
                     0
                 };
+                let constraint_scale = constraint_scale_for_surface(
+                    &self.world,
+                    on_output.copied(),
+                    preferred_scale.map(|scale| scale.0),
+                );
                 if let Some(min_size) = &hints.min_size {
                     data.toplevel.set_min_size(
-                        (min_size.width as f64 / scale_factor.0) as i32,
-                        (min_size.height as f64 / scale_factor.0) as i32 + decorations_height,
+                        (min_size.width as f64 / constraint_scale) as i32,
+                        (min_size.height as f64 / constraint_scale) as i32 + decorations_height,
                     );
                 }
                 if let Some(max_size) = &hints.max_size {
                     data.toplevel.set_max_size(
-                        (max_size.width as f64 / scale_factor.0) as i32,
-                        (max_size.height as f64 / scale_factor.0) as i32 + decorations_height,
+                        (max_size.width as f64 / constraint_scale) as i32,
+                        (max_size.height as f64 / constraint_scale) as i32 + decorations_height,
                     );
+                }
+
+                if let Some(surface) = data
+                    .xdg
+                    .surface
+                    .data()
+                    .copied()
+                    .and_then(|entity| self.world.get::<&client::wl_surface::WlSurface>(entity).ok())
+                {
+                    surface.commit();
                 }
             }
             win.attrs.size_hints = Some(hints);
