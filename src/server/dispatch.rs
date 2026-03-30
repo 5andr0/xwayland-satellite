@@ -236,6 +236,7 @@ impl<S: X11Selection>
                         server,
                         viewport,
                         scale: SurfaceScaleFactor(1.0),
+                        preferred_scale: event::PreferredSurfaceScaleFactor(1.0),
                     },
                 );
                 if let Some(f) = fractional {
